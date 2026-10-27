@@ -1,66 +1,106 @@
-name: Go
+
+name: Pipeline CI/CD Go
 
 on:
   push:
-    branches: [ '*' ]
+    branches:
+      - '**'
   pull_request:
-    branches: [ '*' ]
+    branches:
+      - '**'
+
+permissions:
+  contents: read
 
 jobs:
-
   test:
-    runs-on: ${{ matrix.os }}
+    name: Testes Go
+    runs-on: ubuntu-24.04
+
     env:
       HOST: localhost
-      DBPORT: 5432
+      DBPORT: "5432"
       USER: root
       PASSWORD: root
       DBNAME: root
-    strategy:
-      matrix:
-        go_version: ['1.18', '1.17', '>=1.18']
-        os: ['ubuntu-latest', 'ubuntu-18.04']
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: root
+          POSTGRES_PASSWORD: root
+          POSTGRES_DB: root
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U root -d root"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
-    - uses: actions/checkout@v3
+      - name: Checkout do repositorio
+        uses: actions/checkout@v7
 
-    - name: Set up Go
-      uses: actions/setup-go@v3
-      with:
-        go-version: ${{ matrix.go_version }}
-      
-    - name: Build-DB
-      run: docker compose build
-      
-    - name: Create-DB
-      run: docker compose up -d
+      - name: Configurar Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.x'
+          cache: true
 
-    - name: Test
-      run: go test -v main_test.go 
-      
-  
+      - name: Verificar versao do Go
+        run: go version
+
+      - name: Instalar dependencias
+        run: go mod download
+
+      - name: Executar testes
+        run: go test -v ./...
+
   build:
+    name: Build da aplicacao
     needs: test
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
-    - name: Build
-      run: go build -v main.go
-      
-    - name: Upload a Build Artifact
-      uses: actions/upload-artifact@v3.1.0
-      with:
-    # Artifact name
-        name: programa
-    # A file, directory or wildcard pattern that describes what to upload
-        path: main
+    runs-on: ubuntu-24.04
 
+    steps:
+      - name: Checkout do repositorio
+        uses: actions/checkout@v7
+
+      - name: Configurar Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.x'
+          cache: true
+
+      - name: Compilar aplicacao para Linux
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+          go build -trimpath -o main .
+
+      - name: Verificar executavel
+        run: |
+          ls -lh main
+          file main
+
+      - name: Salvar artefato
+        uses: actions/upload-artifact@v7
+        with:
+          name: programa
+          path: main
+          if-no-files-found: error
+          retention-days: 7
 
   docker:
+    name: Publicar imagem Docker
     needs: build
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/Aula_4' }}
     uses: ./.github/workflows/Docker.yml
     secrets: inherit
-    
+
   Deploy_EC2:
+    name: Deploy AWS EC2
     needs: build
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/Aula_4' }}
     uses: ./.github/workflows/EC2.yml
     secrets: inherit
