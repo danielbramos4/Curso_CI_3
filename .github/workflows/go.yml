@@ -23,6 +23,7 @@ jobs:
       USER: root
       PASSWORD: root
       DBNAME: root
+      DBSSLMODE: disable
 
     services:
       postgres:
