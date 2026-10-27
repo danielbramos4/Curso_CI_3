@@ -1,13 +1,17 @@
-FROM ubuntu:latest
 
-EXPOSE 8000
+FROM debian:bookworm-slim
 
 WORKDIR /app
 
-ENV HOST=localhost DBPORT=5432
+COPY main /app/main
+COPY templates /app/templates
+COPY assets /app/assets
 
-ENV USER=root PASSWORD=root DBNAME=root
+RUN chmod +x /app/main
 
-COPY ./main main
+ENV PORT=8000
+ENV GIN_MODE=release
 
-CMD [ "./main" ]
+EXPOSE 8000
+
+CMD ["./main"]
