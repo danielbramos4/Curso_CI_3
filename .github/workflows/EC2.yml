@@ -29,6 +29,28 @@ jobs:
           test -d assets
           ls -lh main
 
+      - name: Validar variaveis do banco
+        env:
+          DBHOST: ${{ secrets.DBHOST }}
+          DBUSER: ${{ secrets.DBUSER }}
+          DBPASSWORD: ${{ secrets.DBPASSWORD }}
+          DBNAME: ${{ secrets.DBNAME }}
+          DBPORT: ${{ secrets.DBPORT }}
+        run: |
+          for var in DBHOST DBUSER DBPASSWORD DBNAME DBPORT; do
+            if [ -z "${!var}" ]; then
+              echo "::error::Secret $var nao configurado"
+              exit 1
+            fi
+          done
+
+          if ! [[ "$DBPORT" =~ ^[0-9]+$ ]]; then
+            echo "::error::DBPORT invalido"
+            exit 1
+          fi
+
+          echo "Variaveis obrigatorias configuradas"
+
       - name: Preparar servidor EC2
         uses: appleboy/ssh-action@v1.2.5
         with:
