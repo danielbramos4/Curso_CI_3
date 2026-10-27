@@ -1,45 +1,61 @@
+
 name: Docker
 
 on:
   workflow_call:
 
+permissions:
+  contents: read
+
 jobs:
-
   docker:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v3
+    name: Publicar imagem Docker
+    runs-on: ubuntu-24.04
 
-    - name: setup Docker Build
-      uses: docker/setup-buildx-action@v2.0.0
-      
-    - name: Download a Build Artifact
-      uses: actions/download-artifact@v8
-      with:
-    # Artifact name
-        name: programa
-      
-    - name: Docker Login
-  # You may pin to the exact commit or the version.
-  # uses: docker/login-action@49ed152c8eca782a232dede0303416e8f356c37b
-      uses: docker/login-action@v2.0.0
-      with:
-    # Username used to log against the Docker registry
-        username: leonardosartorello
-    # Password or personal access token used to log against the Docker registry
-        password: ${{ secrets.PASSWORD_DOCKER_HUB }}
-        
-        
-    - name: Build and push Docker images
-  # You may pin to the exact commit or the version.
-  # uses: docker/build-push-action@e551b19e49efd4e98792db7592c17c09b89db8d8
-      uses: docker/build-push-action@v3.0.0
-      with:
-    # Build's context is the set of files located in the specified PATH or URL
-        context: .
-    # Path to the Dockerfile
-        file: ./Dockerfile
-    # Push is a shorthand for --output=type=registry
-        push: true
-    # List of tags
-        tags: leonardosartorello/go_ci:${{github.ref_name}}
+    steps:
+      - name: Checkout do repositorio
+        uses: actions/checkout@v7
+
+      - name: Download do artefato
+        uses: actions/download-artifact@v8
+        with:
+          name: programa
+          path: .
+
+      - name: Verificar arquivos
+        run: |
+          test -f main
+          test -f Dockerfile
+          test -d templates
+          test -d assets
+          ls -lh main
+
+      - name: Validar credenciais Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "::error::Credenciais Docker Hub ausentes"
+            exit 1
+          fi
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Docker Login
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            danielbramos/curso_ci_3:latest
+            danielbramos/curso_ci_3:${{ github.sha }}
