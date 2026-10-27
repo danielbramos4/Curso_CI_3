@@ -1,44 +1,128 @@
+
 name: Entrega continua
 
 on:
   workflow_call:
 
-jobs:
+permissions:
+  contents: read
 
+jobs:
   EC2:
-    runs-on: ubuntu-latest
+    name: Deploy na AWS EC2
+    runs-on: ubuntu-24.04
+
     steps:
-    - name: Download a Build Artifact
-      uses: actions/download-artifact@v3.0.0
-      with:
-    # Artifact name
-        name: programa
-    - uses: actions/checkout@v3
-    
-    - name: Deploy to Staging server
-      uses: easingthemes/ssh-deploy@main
-      env:
-        SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-        REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
-        REMOTE_USER: ${{ secrets.REMOTE_USER }}
-        TARGET: /home/${{ secrets.REMOTE_USER }}
-        EXCLUDE: "postgres-data"
-        
-    - name: executing remote ssh commands using password
-      uses: appleboy/ssh-action@master
-      with:
-        host: ${{ secrets.REMOTE_HOST }}
-        username: ${{ secrets.REMOTE_USER }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        port: 22
-        script: |
-          export HOST=${{ secrets.DBHOST }}
-          export USER=${{ secrets.DBUSER }}
-          export PASSWORD=${{ secrets.DBPASSWORD }}
-          export DBNAME=${{ secrets.DBNAME }}
-          export DBPORT=${{ secrets.DBPORT }}
-          export PORT=8000
-          chmod +x main
-          nohup ./main &
-        
-        
+      - name: Checkout do repositorio
+        uses: actions/checkout@v7
+
+      - name: Download do artefato
+        uses: actions/download-artifact@v8
+        with:
+          name: programa
+          path: .
+
+      - name: Verificar arquivos
+        run: |
+          test -f main
+          test -d templates
+          test -d assets
+          ls -lh main
+
+      - name: Preparar servidor EC2
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            set -e
+            mkdir -p "$HOME/curso_ci_3/releases/${{ github.run_id }}-${{ github.run_attempt }}"
+
+      - name: Transferir aplicacao
+        uses: appleboy/scp-action@v1.0.0
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          source: "main,templates,assets"
+          target: "/home/${{ secrets.REMOTE_USER }}/curso_ci_3/releases/${{ github.run_id }}-${{ github.run_attempt }}"
+
+      - name: Executar aplicacao
+        uses: appleboy/ssh-action@v1.2.5
+
+        env:
+          DBHOST: ${{ secrets.DBHOST }}
+          DBUSER: ${{ secrets.DBUSER }}
+          DBPASSWORD: ${{ secrets.DBPASSWORD }}
+          DBNAME: ${{ secrets.DBNAME }}
+          DBPORT: ${{ secrets.DBPORT }}
+
+        with:
+          host: ${{ secrets.REMOTE_HOST }}
+          username: ${{ secrets.REMOTE_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+
+          envs: DBHOST,DBUSER,DBPASSWORD,DBNAME,DBPORT
+
+          script: |
+            set -eu
+
+            APP_DIR="$HOME/curso_ci_3"
+            RELEASE_DIR="$APP_DIR/releases/${{ github.run_id }}-${{ github.run_attempt }}"
+
+            cd "$RELEASE_DIR"
+            chmod +x main
+
+            # Parar a versao anterior, se houver
+            if [ -f "$APP_DIR/app.pid" ]; then
+              OLD_PID=$(cat "$APP_DIR/app.pid")
+
+              if kill -0 "$OLD_PID" 2>/dev/null; then
+                OLD_EXE=$(readlink "/proc/$OLD_PID/exe" 2>/dev/null || true)
+
+                case "$OLD_EXE" in
+                  "$APP_DIR"/releases/*/main*)
+                    kill "$OLD_PID"
+                    sleep 2
+                    ;;
+                  *)
+                    echo "PID pertence a outro processo"
+                    exit 1
+                    ;;
+                esac
+              fi
+            fi
+
+            # Iniciar a nova versao
+            nohup env \
+              HOST="$DBHOST" \
+              USER="$DBUSER" \
+              PASSWORD="$DBPASSWORD" \
+              DBNAME="$DBNAME" \
+              DBPORT="$DBPORT" \
+              PORT=8000 \
+              GIN_MODE=release \
+              ./main > app.log 2>&1 < /dev/null &
+
+            NEW_PID=$!
+            echo "$NEW_PID" > "$APP_DIR/app.pid"
+
+            sleep 3
+
+            # Verificar o processo
+            if ! kill -0 "$NEW_PID" 2>/dev/null; then
+              echo "Erro ao iniciar aplicacao"
+              tail -n 50 app.log
+              exit 1
+            fi
+
+            # Verificar resposta HTTP
+            curl --fail --silent --show-error \
+              --max-time 10 \
+              http://127.0.0.1:8000/deploy-check
+
+            echo "Deploy concluido com sucesso"
