@@ -1,0 +1,1 @@
+Projeto de CI/CD para uma API REST desenvolvida em Go com Gin, utilizando GitHub Actions para testes automatizados, build e deploy na AWS EC2, Docker Hub para publicação de imagens e PostgreSQL no Amazon RDS com conexão TLS.
